@@ -1,0 +1,446 @@
+#define __i386
+
+#ifdef HAVE_CONFIG_H
+#include "config.h"
+#endif
+
+#include <sys/types.h>
+#include <sys/fcntl.h>
+#include </usr/include/netinet/in.h>
+#include <stdio.h>
+#include <errno.h>
+#include <string.h>
+#include <byteswap.h>
+#include "rsl.h"
+
+#ifdef __i386
+#define short_fromsgi(n) ntohs(n)
+#define int_fromsgi(n) ntohl(n)
+#define long_fromsgi(n) htonl(n)
+#else
+#define short_fromsgi(n) n
+#define int_fromsgi(n) n
+#define long_fromsgi(n) n
+#endif
+
+
+/*************************************************************/
+/***** structure for the header of the volumetric scan   *****/
+/*************************************************************/
+typedef struct
+   {
+   short int dum[46];
+   short int nlrecs;
+   short int dum1[3];
+   short int format;
+   short int dum2[5];
+   unsigned int ehour;
+   unsigned int eminute;
+   unsigned int esecond;
+   unsigned int day;
+   unsigned int month;
+   unsigned int year;
+   unsigned int radarid;
+   float radlat, radlon;
+   int nelves;
+   float elvang[24];
+   short int bridge_az_offset;
+   short int hybrid_scan, clutter_filter;
+   short int dum3[315];
+   short int metprm;
+   short int dum4;
+   float dbz_offset, dbz_slope;
+   short int antenna_program;
+   short int dum5[1598];
+
+   } Vscan_Header;
+
+
+/*********************************************************************************/
+/******* structure for the logical records of the compressed volume scan   *******/
+/*********************************************************************************/
+
+#define		buflen		2048
+#define		SIXTY_THREE	63
+#define		MEG		1048576.0
+
+/**************************************************************************/
+
+typedef struct ELEV
+   {
+   signed char elev_number;
+   unsigned char unused_elev[18];
+   } elevation;
+
+typedef struct DATA
+   {
+   unsigned char block_number;
+   unsigned char azimuth_high_order;
+   unsigned char azimuth_low_order;
+   unsigned char dvips[16];
+   } data;
+
+typedef struct EOD
+   {
+   unsigned char sixty_three;
+   unsigned char rhe_status;
+   unsigned char hour;
+   unsigned char minute;
+   unsigned char second;
+   unsigned char compression_mode;
+   unsigned char day;
+   unsigned char month;
+   unsigned char year;
+   unsigned char unused_eod[10];
+   } end_of_data;
+
+typedef union xxxx
+   {
+   elevation elv_seg;
+   data dat_seg;
+   end_of_data eod_seg;
+   } reflectivity_info;
+
+typedef struct MISC
+   {
+   unsigned char logical_record_high;
+   unsigned char logical_record_low;
+   unsigned char last_logical_record;
+   unsigned char elevation_start_num;
+   unsigned char elevation_finish_num;
+   unsigned char last_seg_num_high;
+   unsigned char last_seg_num_low;
+   unsigned char param_type;
+   unsigned char unused[6];
+   reflectivity_info seg[107];
+   unsigned char null_byte;
+   } misc;
+
+typedef union yyyy
+   {
+   unsigned char lrb[2048];
+   misc lr;
+   } u_buf;
+
+
+/***** declaration for the header   *****/
+Vscan_Header hed;
+/***** declaration for the array of logical records to hold the compressed volume scan ******/
+u_buf refbuf[2000];
+
+/***** declaration for the array to hold the uncompressed volume scan  ******/
+/***** This array can hold a maximum of 24 elevations  scans, 360 azimuths per scan,
+and  240 range bins (gates) per azimuth  **********/
+#define  NELEVATIONS  20
+#define  NAZIMUTHS    360
+#define  NRANGEBINS   240
+#define  NBINS_OUT    660
+unsigned char cscan_hr[NELEVATIONS][NAZIMUTHS][NRANGEBINS];
+
+
+Radar *RSL_cth_to_radar(char *infile)
+   {
+   int oflag, icount, i, istat, j;
+   int irec, iv, nvols;
+   int ic, iseg, ibp, printfl;
+   int curelv, curazm, curran, ityp, iblk, ibpp;
+   int ifile, idum, ip,icc;
+   void prepare_cscan();
+   void swap_float_4 (float *tnf4);
+   int ifd, nlrecs, ifdvol;
+   int ielv,jrow,icol;
+   FILE * iflixo;
+   float elvang[20];
+   char filein[50];
+   char fileout[100];
+   float  hora,minuto,dia,mes,ano,segundo;
+   char volscan[NAZIMUTHS][NRANGEBINS];
+   int scale_bins[NBINS_OUT];
+   
+   Radar *radar = NULL;
+   Sweep *sweep = NULL;
+   Volume *volume = NULL;
+   Ray *ray = NULL;
+   static float (*f)(Range x);
+   static Range (*invf)(float x);
+
+   float gr, slantr, h;
+   FILE *ftopo = NULL;
+   float topo[360][240];
+
+   ftopo = fopen("/home/tbiscaro/MORALES/Rachel/topo_c.bin", "r");
+   for(j = 0; j < 360; j++)
+      for(i = 0; i < 240; i++)
+         fread(&topo[j][i], sizeof(float), 1, ftopo);
+   fclose(ftopo);
+   
+
+/*********************************************************************
+Open the file containig the compressed McGill format
+****************************************************************************/
+
+   ifdvol = open(infile, O_RDONLY);
+
+   if (ifdvol < 0)
+      {
+      printf(" error in opening vol file %d\n", errno);
+      return NULL;
+      }
+
+
+/********  Read the header of the volume scan  ( 4096 bytes)   *******/
+   icount = read(ifdvol, &hed, 4096);
+
+   if (icount != 4096)
+      {
+      printf("error on read  %d\n", errno);
+      close(ifdvol);
+      return NULL;
+      }
+   // TODO converter todo header p/ formato local
+
+   hed.nlrecs = short_fromsgi(hed.nlrecs);
+   hed.metprm = short_fromsgi(hed.metprm);
+   hed.format = short_fromsgi(hed.format);
+   hed.nelves = long_fromsgi(hed.nelves);
+
+   hed.ehour = long_fromsgi(hed.ehour);
+   hed.eminute = long_fromsgi(hed.eminute);
+   hed.esecond = long_fromsgi(hed.esecond);
+   hed.day = long_fromsgi(hed.day);
+   hed.month = long_fromsgi(hed.month);
+   hed.year = long_fromsgi(hed.year);
+    
+
+   nlrecs = hed.nlrecs;
+   hora = (float) hed.ehour;
+   minuto = (float) hed.eminute;
+   dia = (float) hed.day;
+   mes = (float) hed.month;
+   ano = (float) hed.year;
+
+
+/*****  next read the all the logical record as indicated in the header   ******/
+   icount = read(ifdvol, refbuf, nlrecs * 2048);
+   if (icount != nlrecs * 2048)
+      {   
+      printf("erron on read of vol %d \n", errno);
+      close(ifdvol);
+      return NULL;
+      }
+   
+   close(ifdvol);
+
+   /* Swap no Angulo de Elevacao */
+   for (icc=0;icc<20;icc++)
+      {
+      elvang[icc]=hed.elvang[icc];
+      swap_float_4(&elvang[icc]);
+      }
+
+   /******   prepare the cscan array   **********/
+   prepare_cscan();
+
+    
+/*Puts the data into a RSL Radar structure*/
+/*
+#define  NELEVATIONS  24
+#define  NAZIMUTHS    360
+#define  NRANGEBINS   240
+lon_cth = -45.9722
+lat_cth = -23.6000
+*/
+   
+   radar = RSL_new_radar(MAX_RADAR_VOLUMES);
+   if (NULL == radar)
+      {      
+      printf(" error in opening vol file %d\n", errno);
+      return NULL;
+      }
+   
+   radar->h.height = 916;
+   radar->h.latd = -23;
+   radar->h.lond = -45;
+   radar->h.latm = 36;
+   radar->h.lonm = 58;
+   radar->h.lats = 0;
+   radar->h.lons = 20;
+   
+   radar->h.year = hed.year;
+   radar->h.month = hed.month;
+   radar->h.day = hed.day;
+   radar->h.hour = hed.ehour;
+   radar->h.minute = hed.eminute;
+   radar->h.sec = hed.esecond;
+
+   
+   /*
+      LUT - 0 - 240 bins (different bin resolutions) to
+      0 - 660 bins (1 bin / 500m)
+   */
+   for (i = 0; i < 60; i++)
+      {   
+      scale_bins[i] = i;
+      }
+
+   for (i = 0; i < 120; i++)
+      {
+      scale_bins[60 + i] = 60 + (i / 2);
+      }
+
+   for (i = 0; i < 480; i++)
+      {
+      scale_bins[180 + i] = 120 + (i / 4);
+      }
+   
+   volume = RSL_new_volume(NELEVATIONS);
+   volume->h.f = DZ_F;
+   volume->h.invf = DZ_INVF;
+   for (ielv = 0; ielv < NELEVATIONS; ielv++)
+      {
+      volume->sweep[ielv] = RSL_new_sweep(NAZIMUTHS);
+      volume->sweep[ielv]->h.sweep_num = ielv + 1;
+      volume->sweep[ielv]->h.beam_width = 2.0;
+      volume->sweep[ielv]->h.vert_half_bw = 1.0;
+      volume->sweep[ielv]->h.horz_half_bw = 1.0;
+      volume->sweep[ielv]->h.nrays = NAZIMUTHS;
+      volume->sweep[ielv]->h.elev = elvang[ielv];
+      volume->sweep[ielv]->h.f = volume->h.f;
+      volume->sweep[ielv]->h.invf = volume->h.invf;
+      
+      for (jrow = 0; jrow < NAZIMUTHS; jrow++)
+         {
+         ray = RSL_new_ray(NBINS_OUT);
+         ray->h.ray_num = jrow + 1;
+         ray->h.gate_size = 500;
+         ray->h.range_bin1 = 0;
+         ray->h.elev_num = volume->sweep[ielv]->h.sweep_num;
+         ray->h.elev = volume->sweep[ielv]->h.elev;
+         ray->h.azimuth = jrow;
+         
+
+         ray->h.month = radar->h.month;
+         ray->h.day = radar->h.day;  
+         ray->h.year = radar->h.year; 
+         ray->h.hour = radar->h.hour; 
+         ray->h.minute = radar->h.minute;
+         
+         /*
+         ray->h.prf = prf;
+         ray->h.pulse_width = pulse;
+         ray->h.wavelength = wavelength;
+         */
+         ray->h.beam_width = volume->sweep[ielv]->h.beam_width;
+         ray->h.f = volume->h.f;
+         ray->h.invf = volume->h.invf;
+         ray->h.nbins = NBINS_OUT;
+         
+         for (icol = 0; icol < NBINS_OUT; icol++)
+            {
+            RSL_get_gr_slantr_h(ray, icol, &gr, &slantr, &h);
+            h = 1000*h + radar->h.height;
+            if ((h < topo[jrow][scale_bins[icol]]) || (cscan_hr[ielv][jrow][scale_bins[icol]] == 0))
+               {
+               ray->range[icol] = volume->h.invf(NOECHO);
+               }
+            else
+               {
+               ray->range[icol] =
+                  volume->h.invf((((float) cscan_hr[ielv][jrow][scale_bins[icol]]) * 0.22 + 17));
+               }
+            }
+         volume->sweep[ielv]->ray[jrow] = ray;
+         }
+      }
+
+   radar->v[CZ_INDEX] = volume;
+   return radar;
+   }
+
+
+void prepare_cscan()
+   {
+   int ibpp, irec, curazm, curelv, curran, ic;
+   int nlrecs, iseg, iblk, ibp;
+   int col, row, idum, ielv, jrow, icol, npon;
+   int iaz;
+
+   nlrecs = hed.nlrecs;
+
+/* fill the array with zeroes        */
+   for (ielv = 0; ielv < NELEVATIONS; ielv++)
+      {
+      for (jrow = 0; jrow < NAZIMUTHS; jrow++)
+         {
+         for (icol = 0; icol < NRANGEBINS; icol++)
+            {
+            cscan_hr[ielv][jrow][icol] = 0;
+            }
+         }
+      }
+/* get cscan from the compressed  volume scan       */
+
+/*********** loop on all logical records ******/
+   for (irec = 0; irec < nlrecs; irec++)
+      {
+      /*printf("irec = %d\n", irec);*/
+/******** loop on all segments on the logical record  ******/
+      for (iseg = 0; iseg < 107; iseg++)
+         {
+         ibpp = refbuf[irec].lr.seg[iseg].elv_seg.elev_number;
+         /***************************************/
+         /********   elevation  or end of data segments    *******/
+         /**************************************/
+
+         if (ibpp > 31)
+            {
+            /*printf("elevation = %d\n ", ibpp - 31);*/	/*,ELEV.elev_number); */
+            curelv = (ibpp - 31) - 1;
+            /********  end of data segment reached hence skip out of the loop  *****/
+            if (curelv > 23)
+               goto end;
+            }
+         /**** elevation or end of data segments  *****/
+         /********************************/
+         /********  data segment  ********/
+         /*******************************/
+         else
+            {
+            /*********  azimuth of the segment   ******/
+            curazm =
+               (refbuf[irec].lr.seg[iseg].dat_seg.
+                azimuth_high_order) * 64 +
+               refbuf[irec].lr.seg[iseg].dat_seg.azimuth_low_order - 1;
+            /********  range block #  ******/
+            iblk = (refbuf[irec].lr.seg[iseg].dat_seg.block_number);
+            /********  the begining range bin # in the block *****/
+            ibp = (iblk - 1) * 16;
+            /***** loop to transfer the 16 bins in the block to cscan array *****/
+            for (ic = 0; ic < 16; ic++)
+               {
+               curran = ibp + ic;
+               cscan_hr[curelv][curazm][curran]
+                  = refbuf[irec].lr.seg[iseg].dat_seg.dvips[ic];
+               }		/* loop on on 16 range bins  */
+            }			/* it is a data segment       */
+         
+           nextsegment:
+         ic = 0;
+         }
+      /****** loop on all segments  ***********/
+      }
+   /***************** looop on all records   ************/
+   
+     end:
+   idum = 1;
+   }				/* end of prepare_cscan   */
+
+void swap_float_4(float *tnf4)
+/**************************************************************************
+swap_float_4		swap a float
+***************************************************************************/
+   {
+   int *tni4=(int *)tnf4;
+   *tni4=(((*tni4>>24)&0xff) | ((*tni4&0xff)<<24) |
+          ((*tni4>>8)&0xff00) | ((*tni4&0xff00)<<8));
+   }
