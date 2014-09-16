@@ -1,5 +1,4 @@
 /*
-
 HDF5 handling added by:
 
 Thiago S. Biscaro - thiago.biscaro@cptec.inpe.br
@@ -530,7 +529,7 @@ Radar *RSL_hdf5_to_radar(char *infile)
             ray->h.sec = cal_time->tm_sec;
             
             ray->h.ray_num = n_ray + 1;
-            ray->h.gate_size = r_sample*r_step;
+            ray->h.gate_size = r_step;
             ray->h.range_bin1 = 0;
             ray->h.elev_num = volume->sweep[n_sweep]->h.sweep_num;
             ray->h.elev = (float) ((ray_elev0[n_ray] + ray_elev1[n_ray])/2);
