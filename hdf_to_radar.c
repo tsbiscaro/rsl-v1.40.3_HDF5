@@ -13,7 +13,7 @@ Cachoeira Paulista/SP 12630000 Brazil
 
 
 /*
-    NASA/TRMM, Code 910.1.
+    NASA/TRMM, Code 910.1.q
     This is the TRMM Office Radar Software Library.
     Copyright (C) 1996, 1997
             Mike Kolander
@@ -32,7 +32,7 @@ Cachoeira Paulista/SP 12630000 Brazil
 
     You should have received a copy of the GNU Library General Public
     License along with this library; if not, write to the Free
-    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+    Software Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, US.
 */
 #ifdef HAVE_CONFIG_H
 #include "config.h"
@@ -40,6 +40,7 @@ Cachoeira Paulista/SP 12630000 Brazil
 
 #ifdef HAVE_LIBHDF5
 #include <hdf5.h>
+#include <hdf5_hl.h>
 #endif
 
 #include <math.h>
@@ -53,57 +54,646 @@ Cachoeira Paulista/SP 12630000 Brazil
 
 #ifdef HAVE_LIBHDF5
 
-#define DEFINED_VOLUMES 8
+#define DEFINED_VOLUMES 9
 #define VERSION1_8_0
 #define MAX_HDF_STR 255
+#define MAXSWEEPS 40
+
 int return_vartype(char *var)
    {
-   char *nome_var[DEFINED_VOLUMES] = {"Z", "UZ", "V", "W", "ZDR", "PhiDP", 
-				      "KDP", "RhoHV"};
-   int vars[DEFINED_VOLUMES] = {CZ_INDEX, DZ_INDEX, VR_INDEX, 
-				SW_INDEX, DR_INDEX, PH_INDEX, 
-				KD_INDEX, RH_INDEX};
+     char *nome_var[DEFINED_VOLUMES] = {"Z", "UZ", "V", "W", "ZDR", "PhiDP", 
+                                        "uPhiDP", "KDP", "RhoHV"};
+     int vars[DEFINED_VOLUMES] = {CZ_INDEX, DZ_INDEX, VR_INDEX, 
+                                  SW_INDEX, DR_INDEX, PH_INDEX,
+                                  NP_INDEX, KD_INDEX, RH_INDEX};
    int i;
    
    for (i = 0; i < DEFINED_VOLUMES; i++)
-      {
-      if (0 == strcmp(var, nome_var[i]))
+     {
+       if (0 == strcmp(var, nome_var[i]))
          {
-         return (vars[i]);
+	   return (vars[i]);
          }
-      }
+     }
    return (-1);
    }
 
-Radar *RSL_hdf5_to_radar(char *infile)
+
+Radar *RSL_hdf5_ODIM_to_radar(char *infile)
+  {
+  hid_t file, scan, vol, attr, dataspace, memspace, how,
+    header, elev0, elev1, azim0, azim1, what, memtype, where,
+    time;
+  int status;
+  int variavel;
+  
+  int n_sweep, n_ray, n_bin, n_volume;
+  char grp_name[MAX_HDF_STR];
+  int rank;
+  
+  char moments[MAX_RADAR_VOLUMES][MAX_HDF_STR];
+  char date_tmp[MAX_HDF_STR];
+  char version_str[MAX_HDF_STR];
+  
+  int pulse;
+  double r_step = 0, r_sample = 0, r_start = 0,
+     horiz_beam = 0, verti_beam = 0, nyq_vel = 0,
+     height = 0, lat = 0, lon = 0, min = 0, sec = 0,
+     wavelength = 0, elev = 0, pulsewidth = 0,
+     prf = 0, prf2 = 0, gain = 0, undetect = 0,
+     space = 0, offset = 0, nodata = 0, time_dbl = 0;
+  
+  double *azAngleEnd = NULL, *azAngleIni = NULL;
+
+  int ndims = 0;
+
+  float vmax = -32;
+  float vmin = 100;
+  float vtemp = 0;
+  
+  float r_min = 0, r_max = 0, scale_factor = 0, elev_header = 0;
+  char arquivo[MAX_HDF_STR];
+  hsize_t dims[1], sz, width, height2, planes, npals;
+  int *data_out = NULL;
+  double *ray_elev0 = NULL, *ray_elev1 = NULL;
+  double *ray_azim0 = NULL, *ray_azim1 = NULL;
+  unsigned long long *timestamp = NULL;
+  char date_str[9], time_str[7],
+     var_name[8], *data_size = NULL;
+  
+  unsigned char *image = NULL;
+  float *image32 = NULL;
+  int i;
+  
+  int NSWEEPS = 0, NVOLUMES = 0, NRAYS = 0, NBINS = 0;
+  
+  time_t scan_time;
+  H5T_class_t class_id;
+  hsize_t dims2;
+  size_t sz2;
+  
+
+  Radar *radar = NULL;
+  Sweep *sweep = NULL;
+  Volume *volume[MAX_RADAR_VOLUMES];
+  Ray *ray = NULL;
+  struct tm *cal_time = NULL;
+  
+  static float (*f)(Range x);
+  static Range (*invf)(float x);
+
+  int voltype = -1, valid_vol = 0;
+
+  int use_volume[MAX_RADAR_VOLUMES];
+  
+  strcpy(arquivo, infile);
+
+   
+  file = H5Fopen(arquivo, H5F_ACC_RDONLY, H5P_DEFAULT);
+  if (file < 0)
+     {
+     printf("ERRO\n");
+     return (-1);
+     }
+
+
+  /*saves the number of scans (elevations) in this file*/
+  for (n_sweep=0; n_sweep < MAXSWEEPS; n_sweep++)
+      {
+      memset(grp_name, 0, sizeof(grp_name));
+      sprintf(grp_name, "dataset%d", n_sweep + 1);
+#ifdef VERSION1_8_0
+      scan = H5Gopen(file, grp_name, H5P_DEFAULT);
+#else
+      scan = H5Gopen(file, grp_name);
+#endif
+      if (scan < 0)
+         {
+         NSWEEPS = n_sweep;
+         break;
+         }
+      }
+     
+  
+#ifdef VERSION1_8_0   
+  how = H5Gopen(file, "/how", H5P_DEFAULT);
+  what = H5Gopen(file, "/what", H5P_DEFAULT);
+  where = H5Gopen(file, "/where", H5P_DEFAULT);
+#else
+   how = H5Gopen(file, "/how");
+   what = H5Gopen(file, "/what");
+   where = H5Gopen(file, "/where");
+#endif
+
+
+   attr = H5Aopen(what, "version", H5P_DEFAULT);
+   memtype = H5Aget_type(attr);
+   memset(version_str, 0, sizeof(version_str));
+   status = H5Aread(attr, memtype, &version_str);
+   H5Tclose(memtype);
+   H5Aclose(attr);
+   
+   if (0 != strncmp(version_str, "H5Rad 2.1", 9))
+      {
+      printf("Versao invalida do HDF (deveria ser 2.1)\n");
+      return 0;
+      }
+   
+
+   attr = H5Aopen(where, "height", H5P_DEFAULT);
+   status = H5Aread(attr, H5T_NATIVE_DOUBLE, &height);
+   H5Aclose(attr);
+
+   attr = H5Aopen(where, "lat", H5P_DEFAULT);
+   status = H5Aread(attr, H5T_NATIVE_DOUBLE, &lat);
+   H5Aclose(attr);
+
+   attr = H5Aopen(where, "lon", H5P_DEFAULT);
+   status = H5Aread(attr, H5T_NATIVE_DOUBLE, &lon);
+   H5Aclose(attr);
+
+   H5Gclose(where);
+
+   /*reading date/time information*/
+   attr = H5Aopen(what, "date", H5P_DEFAULT);
+   memtype = H5Aget_type(attr);
+   memset(date_str, 0, sizeof(date_str));
+   status = H5Aread(attr, memtype, &date_str);
+   H5Tclose(memtype);
+   H5Aclose(attr);
+
+   attr = H5Aopen(what, "time", H5P_DEFAULT);
+   memtype = H5Aget_type(attr);
+   memset(time_str, 0, sizeof(time_str));
+   status = H5Aread(attr, memtype, &time_str);
+   H5Tclose(memtype);
+   H5Aclose(attr);
+
+   H5Gclose(what);
+ 
+   attr = H5Aopen(how, "beamwH", H5P_DEFAULT);
+   status = H5Aread(attr, H5T_NATIVE_DOUBLE, &horiz_beam);
+   H5Aclose(attr);
+   
+   attr = H5Aopen(how, "beamwV", H5P_DEFAULT);
+   status = H5Aread(attr, H5T_NATIVE_DOUBLE, &verti_beam);
+   H5Aclose(attr);
+   
+   H5Gclose(how);
+   
+   radar = RSL_new_radar(MAX_RADAR_VOLUMES);
+   for (n_volume = 0; n_volume < MAX_RADAR_VOLUMES; n_volume++)
+      {   
+      volume[n_volume] = RSL_new_volume(NSWEEPS);
+      }
+   
+   /*writes lat/lon and height info to the radar header*/
+   radar->h.height = height;
+
+   radar->h.latd = (int) lat;
+   radar->h.lond = (int) lon;
+   lat = fabs(lat);
+   lon = fabs(lon);
+   radar->h.latm = (int) ((lat - abs(radar->h.latd)) * 60);
+   radar->h.lonm = (int) ((lon - abs(radar->h.lond)) * 60);
+   radar->h.lats = (int) ((((lat - abs(radar->h.latd)) * 60) -
+                           radar->h.latm) * 60);
+   radar->h.lons = (int) ((((lon - abs(radar->h.lond)) * 60) -
+                           radar->h.lonm) * 60);
+
+   date_tmp[0] = date_str[0];
+   date_tmp[1] = date_str[1];
+   date_tmp[2] = date_str[2];
+   date_tmp[3] = date_str[3];
+   date_tmp[4] = '\0';
+   radar->h.year = atoi(date_tmp);
+   date_tmp[0] = date_str[4];
+   date_tmp[1] = date_str[5];
+   date_tmp[2] = '\0';
+   radar->h.month = atoi(date_tmp);
+   date_tmp[0] = date_str[6];
+   date_tmp[1] = date_str[7];
+   date_tmp[2] = '\0';
+   radar->h.day = atoi(date_tmp);
+   date_tmp[0] = time_str[0];
+   date_tmp[1] = time_str[1];
+   date_tmp[2] = '\0';
+   radar->h.hour = atoi(date_tmp);
+   date_tmp[0] = time_str[2];
+   date_tmp[1] = time_str[3];
+   date_tmp[2] = '\0';
+   radar->h.minute = atoi(date_tmp);
+   date_tmp[0] = time_str[4];
+   date_tmp[1] = time_str[5];
+   date_tmp[2] = '\0';
+   radar->h.sec = atoi(date_tmp);
+
+   memset(use_volume, -1, MAX_RADAR_VOLUMES*sizeof(int));
+   
+   for (n_sweep=0; n_sweep < NSWEEPS; n_sweep++)
+      {
+      memset(grp_name, 0, sizeof(grp_name));
+      sprintf(grp_name, "dataset%d", n_sweep + 1);
+#ifdef VERSION1_8_0
+      scan = H5Gopen(file, grp_name, H5P_DEFAULT);
+#else
+      scan = H5Gopen(file, grp_name);
+#endif
+      if (scan < 0)
+         {
+         break;
+         }
+      
+#ifdef VERSION1_8_0   
+      how = H5Gopen(scan, "how", H5P_DEFAULT);
+      what = H5Gopen(scan, "what", H5P_DEFAULT);
+      where = H5Gopen(scan, "where", H5P_DEFAULT);
+#else
+      how = H5Gopen(scan, "how");
+      what = H5Gopen(scan, "what");
+      where = H5Gopen(scan, "where");
+#endif
+      
+      attr = H5Aopen(where, "elangle", H5P_DEFAULT);
+      status = H5Aread(attr, H5T_NATIVE_DOUBLE, &elev);
+      H5Aclose(attr);
+      
+      attr = H5Aopen(where, "nbins", H5P_DEFAULT);
+      status = H5Aread(attr, H5T_NATIVE_INT, &NBINS);
+      H5Aclose(attr);
+      
+      attr = H5Aopen(where, "nrays", H5P_DEFAULT);
+      status = H5Aread(attr, H5T_NATIVE_INT, &NRAYS);
+      H5Aclose(attr);
+      
+      attr = H5Aopen(where, "rscale", H5P_DEFAULT);
+      status = H5Aread(attr, H5T_NATIVE_DOUBLE, &r_step);
+      H5Aclose(attr);
+      
+      attr = H5Aopen(where, "rstart", H5P_DEFAULT);
+      status = H5Aread(attr, H5T_NATIVE_DOUBLE, &r_start);
+      H5Aclose(attr);
+      
+      H5Gclose(where);
+      
+      attr = H5Aopen(how, "wavelength", H5P_DEFAULT);
+      status = H5Aread(attr, H5T_NATIVE_DOUBLE, &wavelength);
+      H5Aclose(attr);
+      
+      attr = H5Aopen(how, "highprf", H5P_DEFAULT);
+      status = H5Aread(attr, H5T_NATIVE_DOUBLE, &prf);
+      H5Aclose(attr);
+      
+      attr = H5Aopen(how, "lowprf", H5P_DEFAULT);
+      status = H5Aread(attr, H5T_NATIVE_DOUBLE, &prf2);
+      H5Aclose(attr);
+      
+      attr = H5Aopen(how, "pulsewidth", H5P_DEFAULT);
+      status = H5Aread(attr, H5T_NATIVE_DOUBLE, &pulsewidth);
+      H5Aclose(attr);
+      
+      attr = H5Aopen(how, "NI", H5P_DEFAULT);
+      status = H5Aread(attr, H5T_NATIVE_DOUBLE, &nyq_vel);
+      H5Aclose(attr);
+      
+      attr = H5Aopen(how, "beamwH", H5P_DEFAULT);
+      status = H5Aread(attr, H5T_NATIVE_DOUBLE, &horiz_beam);
+      H5Aclose(attr);
+      
+      attr = H5Aopen(how, "beamwV", H5P_DEFAULT);
+      status = H5Aread(attr, H5T_NATIVE_DOUBLE, &verti_beam);
+      H5Aclose(attr);
+      
+      H5Gclose(how);
+      
+      attr = H5Aopen(what, "startdate", H5P_DEFAULT);
+      memtype = H5Aget_type(attr);
+      memset(date_str, 0, sizeof(date_str));
+      status = H5Aread(attr, memtype, &date_str);
+      H5Tclose(memtype);
+      H5Aclose(attr);
+      
+      attr = H5Aopen(what, "starttime", H5P_DEFAULT);
+      memtype = H5Aget_type(attr);
+      memset(time_str, 0, sizeof(time_str));
+      status = H5Aread(attr, memtype, &time_str);
+      H5Tclose(memtype);
+      H5Aclose(attr);
+      
+      H5Gclose(what);
+
+      
+      NVOLUMES = 0;
+      
+      for (n_volume = 0; n_volume < MAX_RADAR_VOLUMES; n_volume++)
+         {
+         memset(grp_name, 0, sizeof(grp_name));
+         sprintf(grp_name, "data%d", n_volume + 1);
+#ifdef VERSION1_8_0
+         vol = H5Gopen(scan, grp_name, H5P_DEFAULT);
+#else
+         vol = H5Gopen(scan, grp_name);
+#endif
+	 if (vol < 0)
+            {
+            break;
+            }
+         
+         volume[n_volume]->sweep[n_sweep] = RSL_new_sweep(NRAYS);
+         volume[n_volume]->sweep[n_sweep]->h.sweep_num = n_sweep + 1;
+         volume[n_volume]->sweep[n_sweep]->h.beam_width =
+            (verti_beam + horiz_beam)/2;
+         volume[n_volume]->sweep[n_sweep]->h.vert_half_bw =
+            verti_beam / 2;
+         volume[n_volume]->sweep[n_sweep]->h.horz_half_bw =
+            horiz_beam / 2;
+         volume[n_volume]->sweep[n_sweep]->h.nrays = NRAYS;
+	 volume[n_volume]->sweep[n_sweep]->h.elev = elev;
+
+#ifdef VERSION1_8_0   
+         how = H5Gopen(vol, "how", H5P_DEFAULT);
+         what = H5Gopen(vol, "what", H5P_DEFAULT);
+#else
+         how = H5Gopen(vol, "how");
+         what = H5Gopen(vol, "what");
+#endif   
+            
+         attr = H5Aopen(what, "quantity", H5P_DEFAULT);
+         memtype = H5Aget_type(attr);
+         /*string size in BYTES*/
+         memset(var_name, 0, sizeof(var_name));
+         status = H5Aread(attr, memtype, &var_name);
+         H5Tclose(memtype);
+         H5Aclose(attr);
+
+
+         voltype = return_type_var(var_name);
+         
+         if (0 > voltype)
+            {
+            H5Gclose(how);
+            H5Gclose(what);
+            continue;
+            }
+
+         /*marca que esse volume tem uma variavel valida*/
+         use_volume[n_volume] = voltype;
+         
+         attr = H5Aopen(what, "gain", H5P_DEFAULT);
+         status = H5Aread(attr, H5T_NATIVE_DOUBLE, &gain);
+         H5Aclose(attr);
+            
+         attr = H5Aopen(what, "nodata", H5P_DEFAULT);
+         status = H5Aread(attr, H5T_NATIVE_DOUBLE, &nodata);
+         H5Aclose(attr);
+            
+         attr = H5Aopen(what, "offset", H5P_DEFAULT);
+         status = H5Aread(attr, H5T_NATIVE_DOUBLE, &offset);
+         H5Aclose(attr);
+            
+         attr = H5Aopen(what, "undetect", H5P_DEFAULT);
+         status = H5Aread(attr, H5T_NATIVE_DOUBLE, &undetect);
+         H5Aclose(attr);
+            
+         H5Gclose(what);
+            
+         attr = H5Aopen(how, "startazA", H5P_DEFAULT);
+         space = H5Aget_space (attr);
+         NRAYS = H5Sget_simple_extent_npoints(space);
+         azAngleIni = (double *) calloc(NRAYS, sizeof(double));
+         memtype = H5Tcopy(H5T_IEEE_F64LE);
+         status = H5Aread (attr, memtype, azAngleIni);
+         H5Tclose(memtype);
+         H5Sclose (space);
+         H5Aclose(attr);
+            
+         attr = H5Aopen(how, "stopazA", H5P_DEFAULT);
+         space = H5Aget_space (attr);
+         NRAYS = H5Sget_simple_extent_npoints(space);
+         azAngleEnd = (double *) calloc(NRAYS, sizeof(double));
+         memtype = H5Tcopy(H5T_IEEE_F64LE);
+         status = H5Aread (attr, memtype, azAngleEnd);
+         H5Tclose(memtype);
+         H5Sclose (space);
+         H5Aclose(attr);
+         H5Gclose(how);
+            
+         status = H5LTget_dataset_info(vol, "data", &dims2, &class_id, &sz2);
+         if (H5T_INTEGER == class_id)
+            {
+            image = (unsigned char *) malloc(NRAYS*NBINS*sizeof(unsigned char));
+            status = H5LTread_dataset (vol, "data", H5T_NATIVE_UCHAR, image);
+            }
+         else
+            {
+            image32 = (float *) malloc(NRAYS*NBINS*sizeof(float));
+            status = H5LTread_dataset (vol, "data", H5T_NATIVE_FLOAT, image32);
+            }
+         
+         switch (voltype)
+            {
+            case DZ_INDEX:
+               f = DZ_F;
+               invf = DZ_INVF;
+               break;
+            case VR_INDEX:
+               f = VR_F;
+               invf = VR_INVF;
+               break;
+            case SW_INDEX:
+               f = VR_F;
+               invf = VR_INVF;
+               break;
+            case CZ_INDEX:
+               f = DZ_F;
+               invf = DZ_INVF;
+               break;
+            case DR_INDEX:
+               f = DR_F;
+               invf = DR_INVF;
+               break;
+            case PH_INDEX:
+            case NP_INDEX:
+               f = PH_F;
+               invf = PH_INVF;
+               break;
+            case KD_INDEX:
+               f = KD_F;
+               invf = KD_INVF;
+               break;
+            case RH_INDEX:
+               f = RH_F;
+               invf = RH_INVF;
+            break;
+            }
+         volume[n_volume]->h.f = f;
+         volume[n_volume]->h.invf = invf;
+         volume[n_volume]->sweep[n_sweep]->h.f = f;
+         volume[n_volume]->sweep[n_sweep]->h.invf = invf;
+//         strcpy(volume[n_volume]->h.type_str, var_name);
+         
+         for (n_ray = 0; n_ray < NRAYS; n_ray++)
+            {
+            ray = RSL_new_ray(NBINS);
+            date_tmp[0] = date_str[0];
+            date_tmp[1] = date_str[1];
+            date_tmp[2] = date_str[2];
+            date_tmp[3] = date_str[3];
+            date_tmp[4] = '\0';
+            ray->h.year = atoi(date_tmp);
+            date_tmp[0] = date_str[4];
+            date_tmp[1] = date_str[5];
+            date_tmp[2] = '\0';
+            ray->h.month = atoi(date_tmp);
+            date_tmp[0] = date_str[5];
+            date_tmp[1] = date_str[7];
+            date_tmp[2] = '\0';
+            ray->h.day = atoi(date_tmp);
+            date_tmp[0] = time_str[0];
+            date_tmp[1] = time_str[1];
+            date_tmp[2] = '\0';
+            ray->h.hour = atoi(date_tmp);
+            date_tmp[0] = time_str[2];
+            date_tmp[1] = time_str[3];
+            date_tmp[2] = '\0';
+            ray->h.minute = atoi(date_tmp);
+            date_tmp[0] = time_str[4];
+            date_tmp[1] = time_str[5];
+            date_tmp[2] = '\0';
+            ray->h.sec = atoi(date_tmp);
+                        ray->h.ray_num = n_ray + 1;
+                        
+            ray->h.gate_size = r_step;
+            ray->h.range_bin1 = r_start;
+            ray->h.elev_num = volume[n_volume]->sweep[n_sweep]->h.sweep_num;
+	    ray->h.elev = elev;
+            ray->h.azimuth = (azAngleIni[n_ray] + azAngleEnd[n_ray])/2;
+            ray->h.prf = prf;
+            ray->h.prf2 = prf2;
+            ray->h.pulse_width = pulsewidth;
+            ray->h.wavelength = wavelength;
+            ray->h.beam_width = (verti_beam + horiz_beam)/2;
+            ray->h.nyq_vel = nyq_vel;
+            ray->h.f = f;
+            ray->h.invf = invf;
+            ray->h.nbins = NBINS;
+            if (H5T_FLOAT == class_id)
+               {
+               for (n_bin = 0; n_bin < NBINS; n_bin++)
+                  {
+                  vtemp = image32[n_bin + NBINS*n_ray]*gain + offset;
+                  if ((vtemp == nodata) || (vtemp == undetect) || (vtemp == offset))
+                     {
+                     vtemp = NOECHO;
+                     }
+                  ray->range[n_bin] = invf(vtemp);
+                  }
+               }
+            else
+               {
+               for (n_bin = 0; n_bin < NBINS; n_bin++)
+                  {
+                  vtemp = image[n_bin + NBINS*n_ray]*gain + offset;
+                  if ((vtemp == nodata) || (vtemp == undetect) || (vtemp == offset))
+                     {
+                     vtemp = NOECHO;
+                     }
+                  ray->range[n_bin] = invf(vtemp);
+                  }
+               }
+            volume[n_volume]->sweep[n_sweep]->ray[n_ray] = ray;
+            }
+         
+//         printf("volume %s\t MAX = %10.4f   MIN = %10.4f  GAIN = %10.4f  OFFSET = %10.4f\n", var_name, vmax, vmin, gain, offset);
+         if (H5T_INTEGER == class_id)
+            {   
+            free(image);
+            }
+         else
+            {
+            free(image32);
+            }
+         H5Gclose(vol);
+         }
+      H5Gclose(scan);
+      }
+
+   for (n_volume = 0; n_volume < MAX_RADAR_VOLUMES; n_volume++)
+      {
+      if (-1 != use_volume[n_volume])
+         {
+         radar->v[use_volume[n_volume]] = volume[n_volume];
+         valid_vol++;
+         }
+      }
+   /*
+   for (n_volume = valid_vol; n_volume < MAX_RADAR_VOLUMES; n_volume++)
+      {
+      radar->v[n_volume++] = NULL;
+      }
+   */
+   radar->h.nvolumes = valid_vol;
+   
+   return radar;
+  }
+
+int return_type_var(char *varname)
    {
-   hid_t file, group, vol, attr, dataspace, memspace, how,
-      header, elev0, elev1, azim0, azim1, what, memtype, where,
-      time;
-   int status;
-   int variavel;
-   
-   int n_sweep, n_ray, n_bin, n_volume;
-   char grp_name[MAX_HDF_STR];
-   int rank;
+   if (0 == strncmp(varname, "TH", strlen(varname)))
+      {
+      return DZ_INDEX;
+      }
+   if (0 == strncmp(varname, "DBZH", strlen(varname)))
+      {
+      return CZ_INDEX;
+      }
+   if (0 == strncmp(varname, "VRAD", strlen(varname)))
+      {
+      return VR_INDEX;
+      }
+   if (0 == strncmp(varname, "WRAD", strlen(varname)))
+      {
+      return SW_INDEX;
+      }
+   return -1;
+   }
 
-   int volindx[DEFINED_VOLUMES] = {CZ_INDEX, DZ_INDEX, VR_INDEX, 
-                                   SW_INDEX, DR_INDEX, PH_INDEX, 
-                                   KD_INDEX, RH_INDEX};
 
-   char moments[MAX_RADAR_VOLUMES][MAX_HDF_STR];
-   char date_tmp[MAX_HDF_STR];
-   
-   int pulse, prf;
-   double r_step, r_sample, horiz_beam, verti_beam,
-      height, lat, lon, min, sec, wavelength;
-   float r_min, r_max, scale_factor, elev_header;
-   char arquivo[MAX_HDF_STR];
+Radar *RSL_hdf5_to_radar(char *infile)
+  {
+  hid_t file, group, vol, attr, dataspace, memspace, how,
+    header, elev0, elev1, azim0, azim1, what, memtype, where,
+    time;
+  int status;
+  int variavel;
+  
+  int n_sweep, n_ray, n_bin, n_volume;
+  char grp_name[MAX_HDF_STR];
+  int rank;
+  /*
+  int volindx[DEFINED_VOLUMES] = {CZ_INDEX, DZ_INDEX, VR_INDEX, 
+				  SW_INDEX, DR_INDEX, PH_INDEX, 
+				  NP_INDEX, KD_INDEX, RH_INDEX};
+  */
 
-   hsize_t *dims = NULL;
-   int *data_out = NULL;
-   double *ray_elev0 = NULL, *ray_elev1 = NULL;
-   double *ray_azim0 = NULL, *ray_azim1 = NULL;
+  int volindx[DEFINED_VOLUMES];
+
+  int vartype = -1;
+  
+  
+  char moments[MAX_RADAR_VOLUMES][MAX_HDF_STR];
+  char date_tmp[MAX_HDF_STR];
+  
+  int pulse, prf;
+  double r_step, r_sample, r_start, horiz_beam, verti_beam,
+    height, lat, lon, min, sec, wavelength;
+  float r_min, r_max, scale_factor, elev_header;
+  char arquivo[MAX_HDF_STR];
+  
+  hsize_t *dims = NULL;
+  int *data_out = NULL;
+  double *ray_elev0 = NULL, *ray_elev1 = NULL;
+  double *ray_azim0 = NULL, *ray_azim1 = NULL;
    unsigned long long *timestamp = NULL;
    char *date_time = NULL, *var_name = NULL,
       *template_name = NULL, *data_size = NULL;
@@ -120,6 +710,8 @@ Radar *RSL_hdf5_to_radar(char *infile)
 
    time_t scan_time;
 
+   char version_str[MAX_HDF_STR];
+
 #ifndef VERSION1_8_0
 //   herr_t (*error_stack)(void*);
    
@@ -129,17 +721,18 @@ Radar *RSL_hdf5_to_radar(char *infile)
 #endif
    
    strcpy(arquivo, infile);
-
-   for (n_volume=0; n_volume<MAX_RADAR_VOLUMES; n_volume++)
-      {
-      sprintf(moments[n_volume], "moment_%d\0", n_volume);
-      }
    
    file = H5Fopen(arquivo, H5F_ACC_RDONLY, H5P_DEFAULT);
    if (file < 0)
       {
       printf("ERRO\n");
       return (-1);
+      }
+
+
+   for (n_volume=0; n_volume<MAX_RADAR_VOLUMES; n_volume++)
+      {
+      sprintf(moments[n_volume], "moment_%d\0", n_volume);
       }
    
    radar = RSL_new_radar(MAX_RADAR_VOLUMES);
@@ -153,7 +746,26 @@ Radar *RSL_hdf5_to_radar(char *infile)
    how = H5Gopen(file, "/how");
    what = H5Gopen(file, "/what");
    where = H5Gopen(file, "/where");
-#endif   
+#endif
+
+
+   /*verifica se e HDF ODIM ou GAMIC*/
+   attr = H5Aopen(what, "version", H5P_DEFAULT);
+   memtype = H5Aget_type(attr);
+   memset(version_str, 0, sizeof(version_str));
+   status = H5Aread(attr, memtype, &version_str);
+   H5Tclose(memtype);
+   H5Aclose(attr);
+   if (0 == strncmp(version_str, "H5Rad 2.1", 9))
+      {
+      H5Gclose(how);
+      H5Gclose(what);
+      H5Gclose(where);
+      H5Fclose(file);
+      return RSL_hdf5_ODIM_to_radar(arquivo);
+      }
+   
+   
    attr = H5Aopen(how, "azimuth_beam", H5P_DEFAULT);
    status = H5Aread(attr, H5T_NATIVE_DOUBLE, &horiz_beam);
    H5Aclose(attr);
@@ -282,8 +894,11 @@ Radar *RSL_hdf5_to_radar(char *infile)
 
                status = H5Aread(attr, memtype, &var_name);
                H5Aclose(attr);
-               if (return_vartype(var_name) > -1)
+               vartype = return_vartype(var_name);
+               
+               if (vartype > -1)
                   {
+                  volindx[NVOLUMES] = vartype;
                   NVOLUMES++;
                   }
                free(var_name);
@@ -320,6 +935,7 @@ Radar *RSL_hdf5_to_radar(char *infile)
             invf = DR_INVF;
             break;
          case PH_INDEX:
+         case NP_INDEX:
             f = PH_F;
             invf = PH_INVF;
             break;
@@ -419,12 +1035,6 @@ Radar *RSL_hdf5_to_radar(char *infile)
                           H5P_DEFAULT, ray_azim0);
          H5Tclose(azim0);
          
-         azim1 = H5Tcreate(H5T_COMPOUND, sizeof(double));
-         status = H5Tinsert(azim1, "azimuth_stop", 0,
-                            H5T_NATIVE_DOUBLE);
-         status = H5Dread(header, azim1, H5S_ALL, H5S_ALL,
-                          H5P_DEFAULT, ray_azim1);
-         H5Tclose(azim1);
          
          elev0 = H5Tcreate(H5T_COMPOUND, sizeof(double));
          status = H5Tinsert(elev0, "elevation_start", 0,
@@ -474,6 +1084,10 @@ Radar *RSL_hdf5_to_radar(char *infile)
          status = H5Aread(attr, H5T_NATIVE_DOUBLE, &r_sample);
          H5Aclose(attr);
 
+         attr = H5Aopen(how, "range_start", H5P_DEFAULT);
+         status = H5Aread(attr, H5T_NATIVE_DOUBLE, &r_start);
+         H5Aclose(attr);
+
          attr = H5Aopen(how, "range_step", H5P_DEFAULT);
          status = H5Aread(attr, H5T_NATIVE_DOUBLE, &r_step);
          H5Aclose(attr);
@@ -498,7 +1112,13 @@ Radar *RSL_hdf5_to_radar(char *infile)
          status = H5Aread(attr, memtype, &data_size);
          H5Aclose(attr);
 
+//         printf("RANGE = %d %f %f\n", n_volume, r_min, r_max);
          
+         
+	 // r_max = 50;
+	 //r_min = -50;
+
+
          if (strncmp(data_size, "UV16", 4))
             {   
             scale_factor = (r_max - r_min) / 254;
@@ -514,7 +1134,7 @@ Radar *RSL_hdf5_to_radar(char *infile)
          volume->sweep[n_sweep]->h.beam_width = (verti_beam + horiz_beam)/2;
          volume->sweep[n_sweep]->h.vert_half_bw = verti_beam / 2;
          volume->sweep[n_sweep]->h.horz_half_bw = horiz_beam / 2;
-         
+	 //         printf("ELEV: %f\n", elev_header);
          for (n_ray = 0; n_ray < NRAYS; n_ray++)
             {
             ray = RSL_new_ray(NBINS);
@@ -530,10 +1150,12 @@ Radar *RSL_hdf5_to_radar(char *infile)
             
             ray->h.ray_num = n_ray + 1;
             ray->h.gate_size = r_step;
-            ray->h.range_bin1 = 0;
+	    ray->h.gate_size = r_step*r_sample;
+            ray->h.range_bin1 = r_start;
             ray->h.elev_num = volume->sweep[n_sweep]->h.sweep_num;
-            ray->h.elev = (float) ((ray_elev0[n_ray] + ray_elev1[n_ray])/2);
-            ray->h.azimuth = (ray_azim0[n_ray] + ray_azim1[n_ray])/2;
+	    ray->h.elev = (float) ((ray_elev0[n_ray] + ray_elev1[n_ray])/2);
+	    //ray->h.elev = elev_header;
+            ray->h.azimuth = ray_azim0[n_ray];
             ray->h.prf = prf;
             ray->h.pulse_width = pulse;
             ray->h.wavelength = wavelength;
@@ -544,9 +1166,10 @@ Radar *RSL_hdf5_to_radar(char *infile)
             ray->h.f = f;
             ray->h.invf = invf;
             ray->h.nbins = NBINS;
-            
-            for (n_bin = 0; n_bin < NBINS; n_bin++)
+            ray->range[NBINS - 1] = invf(NOECHO);
+            for (n_bin = 0; n_bin < NBINS - 1; n_bin++)
                {
+		 //printf("%d %d %d\n", n_ray, n_bin, data_out[n_ray*NBINS + n_bin]);
                if (data_out[n_ray*NBINS + n_bin] == 0)
                   {
                   ray->range[n_bin] = invf(NOECHO);
@@ -591,7 +1214,7 @@ Radar *RSL_hdf5_to_radar(char *infile)
          free(ray_elev0);
          free(ray_elev1);
          free(ray_azim0);
-         free(ray_azim1);
+         free(ray_azim1);         
          free(timestamp);
          H5Dclose(vol);
          H5Dclose(header);

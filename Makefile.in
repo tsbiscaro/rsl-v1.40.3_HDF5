@@ -38,8 +38,7 @@ subdir = .
 DIST_COMMON = README $(am__configure_deps) $(srcdir)/Makefile.am \
 	$(srcdir)/Makefile.in $(srcdir)/config.h.in \
 	$(top_srcdir)/configure config.guess config.sub depcomp \
-	install-sh ltmain.sh missing mkinstalldirs rapic-lex.c rapic.c \
-	rapic.h ylwrap
+	install-sh ltmain.sh missing mkinstalldirs
 ACLOCAL_M4 = $(top_srcdir)/aclocal.m4
 am__aclocal_m4_deps = $(top_srcdir)/configure.in
 am__configure_deps = $(am__aclocal_m4_deps) $(CONFIGURE_DEPENDENCIES) \
@@ -74,8 +73,7 @@ am__base_list = \
 am__installdirs = "$(DESTDIR)$(libdir)"
 LTLIBRARIES = $(lib_LTLIBRARIES)
 librsl_la_LIBADD =
-am__objects_1 = rapic_to_radar.lo rapic.lo rapic-lex.lo \
-	rapic_routines.lo
+am__objects_1 = 
 am__objects_2 = radtec_to_radar.lo radtec.lo
 am__objects_3 =
 am__objects_4 = $(am__objects_3)
@@ -91,7 +89,7 @@ am_librsl_la_OBJECTS = $(am__objects_1) $(am__objects_2) dorade.lo \
 	reverse.lo fix_headers.lo nsig_to_radar.lo nsig.lo \
 	nsig2_to_radar.lo africa_to_radar.lo africa.lo \
 	radar_to_hdf_2.lo hdf_to_radar.lo toolkit_memory_mgt.lo \
-	radar_to_hdf_1.lo rainbow.lo rainbow_to_radar.lo cth_to_radar.lo \
+	radar_to_hdf_1.lo rainbow.lo rainbow_to_radar.lo \
 	$(am__objects_4)
 librsl_la_OBJECTS = $(am_librsl_la_OBJECTS)
 librsl_la_LINK = $(LIBTOOL) --tag=CC $(AM_LIBTOOLFLAGS) \
@@ -223,7 +221,6 @@ PACKAGE_BUGREPORT = @PACKAGE_BUGREPORT@
 PACKAGE_NAME = @PACKAGE_NAME@
 PACKAGE_STRING = @PACKAGE_STRING@
 PACKAGE_TARNAME = @PACKAGE_TARNAME@
-PACKAGE_URL = @PACKAGE_URL@
 PACKAGE_VERSION = @PACKAGE_VERSION@
 PATH_SEPARATOR = @PATH_SEPARATOR@
 RANLIB = @RANLIB@
@@ -306,21 +303,21 @@ edge_to_radar.c \
  nsig_to_radar.c nsig.c nsig2_to_radar.c \
  africa_to_radar.c africa.c \
  radar_to_hdf_2.c hdf_to_radar.c toolkit_memory_mgt.c \
- radar_to_hdf_1.c rainbow.c rainbow_to_radar.c cth_to_radar.c $(headers)
+ radar_to_hdf_1.c rainbow.c rainbow_to_radar.c $(headers)
 
 librsl_la_DEPENDENCIES = $(build_headers)
 build_headers = rsl.h wsr88d.h toolkit_1BC-51_appl.h
 headers = africa.h dorade.h lassen.h \
           mcgill.h nsig.h radtec.h rainbow.h \
-          rapic_routines.h toga.h \
+          toga.h \
 		  $(build_headers)
 
-rapic_c = rapic_to_radar.c rapic.y rapic-lex.l rapic_routines.c
+rapic_c = 
 radtec_c = radtec_to_radar.c radtec.c
 PREFIX = rapic
 LFLAGS = -P$(PREFIX)
-EXTRA_DIST = CHANGES CHECK_LIST Copyright GPL LGPL wsr88d_locations.dat rapic.h
-DISTCLEANFILES = rapic.c rapic-lex.c
+EXTRA_DIST = CHANGES CHECK_LIST Copyright GPL LGPL wsr88d_locations.dat 
+DISTCLEANFILES = 
 all: config.h
 	$(MAKE) $(AM_MAKEFLAGS) all-recursive
 
@@ -408,11 +405,6 @@ clean-libLTLIBRARIES:
 	  echo "rm -f \"$${dir}/so_locations\""; \
 	  rm -f "$${dir}/so_locations"; \
 	done
-rapic.h: rapic.c
-	@if test ! -f $@; then \
-	  rm -f rapic.c; \
-	  $(MAKE) $(AM_MAKEFLAGS) rapic.c; \
-	else :; fi
 librsl.la: $(librsl_la_OBJECTS) $(librsl_la_DEPENDENCIES) 
 	$(librsl_la_LINK) -rpath $(libdir) $(librsl_la_OBJECTS) $(librsl_la_LIBADD) $(LIBS)
 
@@ -460,10 +452,6 @@ distclean-compile:
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/rainbow.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/rainbow_to_radar.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/range.Plo@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/rapic-lex.Plo@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/rapic.Plo@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/rapic_routines.Plo@am__quote@
-@AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/rapic_to_radar.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/ray_indexes.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/read_write.Plo@am__quote@
 @AMDEP_TRUE@@am__include@ @am__quote@./$(DEPDIR)/reverse.Plo@am__quote@

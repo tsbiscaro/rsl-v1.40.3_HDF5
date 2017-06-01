@@ -56,7 +56,7 @@ enum File_type RSL_filetype(char *infile)
    * RADTEC - 320      (decimal, in first two bytes)
    * RAINBOW - First two bytes: decimal 1, followed by 'H'
    */
-  FILE *fp;
+  FILE *fp = NULL;
   char magic[11];
 
   if ((fp = fopen(infile, "r")) == NULL) {
@@ -179,7 +179,7 @@ Radar *RSL_anyformat_to_radar(char *infile, ...)
   case    EDGE_FILE: radar = RSL_EDGE_to_radar(infile);   break;
   case  LASSEN_FILE: radar = RSL_lassen_to_radar(infile); break;
   case  DORADE_FILE: radar = RSL_dorade_to_radar(infile); break;
-  case  CTH_FILE: radar = RSL_cth_to_radar(infile); break;
+    //  case  CTH_FILE: radar = RSL_cth_to_radar(infile); break;
   /*Added DSA/CPTEC/INPE dBZ/ZDR/PhiDP/KDP corrected Gematronik file*/
 //  case  DSA_GEMATRONIK_FILE: radar = RSL_dsa_gematronik_to_radar(infile);    break;
 

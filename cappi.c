@@ -194,6 +194,7 @@ int RSL_fill_cappi(Volume *v, Cappi *cap, int method)
          {
          ray = RSL_get_ray(v, v->sweep[a]->h.elev,
                            cap->sweep->ray[b]->h.azimuth);
+
          if (NULL == ray) continue;
          
          for(c = ini_bins; (c < end_bins && c < ray->h.nbins); c++)

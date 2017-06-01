@@ -558,15 +558,15 @@ RSL_nsig_to_radar
           break;
       case NSIG_DTB_UCR:
       case NSIG_DTB_UCR2:
-        ifield = ZT_INDEX;
-        f      = ZT_F; 
-        invf   = ZT_INVF;
-        break;
-      case NSIG_DTB_CR:
-      case NSIG_DTB_CR2:
         ifield = DZ_INDEX;
         f      = DZ_F; 
         invf   = DZ_INVF;
+        break;
+      case NSIG_DTB_CR:
+      case NSIG_DTB_CR2:
+        ifield = CZ_INDEX;
+        f      = CZ_F; 
+        invf   = CZ_INVF;
         break;
       case NSIG_DTB_VEL:
       case NSIG_DTB_VEL2:

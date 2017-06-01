@@ -176,6 +176,9 @@ float HC_F(Range x) {  /* HydroClass (Sigmet) */
 *******************************/
 float RH_F(Range x) {
   if (x == 0) return BADVAL;
+  if (x == 1) return RFVAL;
+  if (x == 2) return APFLAG;
+  if (x == 3) return NOECHO;
   /* return (float)(sqrt((double)((x-1.0)/253.0))); */
   return (float)(x-1) / 65533.;
 }
@@ -192,6 +195,9 @@ float RH_F(Range x) {
 ******************************/
 float PH_F(Range x) {
   if (x == 0) return BADVAL;
+  if (x == 1) return RFVAL;
+  if (x == 2) return APFLAG;
+  if (x == 3) return NOECHO;
   /*return (float)(180.0*((x-1.0)/254.0));*/ 
   return (360.*(x-1.))/65534.;
  }
@@ -225,16 +231,19 @@ float KD_F(Range x)
 ******/
 
   if (x == 0) return BADVAL;
+  if (x == 1) return RFVAL;
+  if (x == 2) return APFLAG;
+  if (x == 3) return NOECHO;  
   return (x-32768.)/100.;
 }
 
-/* Normalized Coherent Power (DORADE) */
+/* Normalized Coherent Power (DORADE) 
 float NP_F(Range x)
 {
   if (x == 0) return BADVAL;
   return (float)(x - 1) / 100.;
 }
-
+*/
 /* Standard Deviation (for Dual-pole QC testing.) */
 float SD_F(Range x)
 {
@@ -258,6 +267,9 @@ float TI_F(Range x)
   if (x == 3) return NOECHO;
   return BADVAL;
 }
+
+//usando NP como uPhiDP
+float NP_F(Range x) {  return PH_F(x); }
 
 float SW_F(Range x) {  return VR_F(x); }
 float CZ_F(Range x) {  return DZ_F(x); }
@@ -346,6 +358,10 @@ Range LR_INVF(float x) /* MCTEX */
 /* RH_INVF for 1 or 2 byte data. */
 Range RH_INVF(float x) {
   if (x == BADVAL) return (Range)0;
+  if (x == RFVAL)  return (Range)1;
+  if (x == APFLAG)  return (Range)2;
+  if (x == NOECHO)  return (Range)3;
+
   /* return (Range)(x * x * 253.0 + 1.0 + 0.5); */
   return (Range)(x * 65533. + 1. +.5);
 }
@@ -362,6 +378,10 @@ Range RH_INVF(float x) {
 *******************************/
 Range PH_INVF(float x) {
   if (x == BADVAL) return (Range)0;
+  if (x == RFVAL)  return (Range)1;
+  if (x == APFLAG)  return (Range)2;
+  if (x == NOECHO)  return (Range)3;
+
   /* return (Range)((x / 180.0) * 254.0 + 1.0 + 0.5); */
   return (Range)(x*65534./360. + 1.0 + 0.5);
 }
@@ -370,6 +390,9 @@ Range PH_INVF(float x) {
 /* KD_INVF for 1 or 2 byte data. */
 Range KD_INVF(float x) {
   if (x == BADVAL) return (Range)0;
+  if (x == RFVAL)  return (Range)1;
+  if (x == APFLAG)  return (Range)2;
+  if (x == NOECHO)  return (Range)3;  
   return (Range)(x * 100. + 32768. + 0.5);
 /****** Old code for 1-byte Sigmet native data format commented-out:
   if (x == RFVAL)  return (Range)1;
@@ -407,13 +430,13 @@ Range SQ_INVF(float x)
   return (Range)(x * 65533. + 1. +.5);
 }
 
-/* Normalized Coherent Power (DORADE) */
+/* Normalized Coherent Power (DORADE) 
 Range NP_INVF(float x)
 {
   if (x == BADVAL) return (0);
   return (Range)(x * 100. + 1.);
 }
-
+*/
 Range TI_INVF(float x) /* MCTEX */
 {
   if (x == BADVAL) return (Range)0;
@@ -423,6 +446,8 @@ Range TI_INVF(float x) /* MCTEX */
   return (Range)(x);
 }
 
+//usando NP como uPhiDP
+Range NP_INVF(float x) {  return PH_INVF(x); }
 
 Range SW_INVF(float x) {  return VR_INVF(x); }
 Range CZ_INVF(float x) {  return DZ_INVF(x); }
@@ -674,8 +699,13 @@ Volume *RSL_clear_volume(Volume *v)
 void RSL_free_ray(Ray *r)
 {
   if (r == NULL) return;
-  if (r->range) free(r->range);
+  if (r->range) {
+  free(r->range);
+  r->range = NULL;
+  }
+  
   free(r);
+  r = NULL;
 }
 void RSL_free_sweep(Sweep *s)
 {
@@ -687,6 +717,7 @@ void RSL_free_sweep(Sweep *s)
   if (s->ray) free(s->ray);
   REMOVE_SWEEP(s); /* Remove from internal Sweep list. */
   free(s);
+  s = NULL;
 }
 void RSL_free_volume(Volume *v)
 {
@@ -699,6 +730,7 @@ void RSL_free_volume(Volume *v)
      }
   if (v->sweep) free(v->sweep);
   free(v);
+  v = NULL;
 }
 
 /**********************************************************************/
@@ -1381,8 +1413,22 @@ Sweep *RSL_get_first_sweep_of_volume(Volume *v)
 {
   int i;
   if (v == NULL) return NULL;
-  for (i=0; i<v->h.nsweeps; i++)
-    if (RSL_get_first_ray_of_sweep(v->sweep[i])) return v->sweep[i];
+
+  if (1 == v->h.nsweeps) return v->sweep[0];
+
+  if (v->sweep[0]->h.elev < v->sweep[v->h.nsweeps - 1]->h.elev)
+     {
+     /*first scan is the lowest*/
+     for (i=0; i<v->h.nsweeps; i++)
+        if (RSL_get_first_ray_of_sweep(v->sweep[i])) return v->sweep[i];
+     }
+  else
+     {
+     /*first scan is the highest*/
+     for (i=v->h.nsweeps-1; i>0;i--)
+        if (RSL_get_first_ray_of_sweep(v->sweep[i])) return v->sweep[i];
+     }
+  
   return NULL;
 }
 

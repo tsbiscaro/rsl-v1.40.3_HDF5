@@ -83,6 +83,7 @@ FILE *uncompress_pipe (FILE *fp)
   if (fpipe == NULL) perror("uncompress_pipe");
   close(0);
   dup(save_fd);
+  fclose(fp);
   return fpipe;
 }
 
