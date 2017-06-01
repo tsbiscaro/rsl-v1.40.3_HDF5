@@ -46,7 +46,7 @@
 /*            so you shouldn't have to modify anything here.          */
 /**********************************************************************/
 #ifndef COLORDIR
-#define COLORDIR "/usr/local/rsl-v1.40.3_HDF5_CTH/lib/colors"
+#define COLORDIR "/usr/local/rsl-v1.40.3_HDF5/lib/colors"
 #endif
 
 /* These are the color table indexes. See RSL_set/get_color_table. */

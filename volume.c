@@ -176,9 +176,6 @@ float HC_F(Range x) {  /* HydroClass (Sigmet) */
 *******************************/
 float RH_F(Range x) {
   if (x == 0) return BADVAL;
-  if (x == 1) return RFVAL;
-  if (x == 2) return APFLAG;
-  if (x == 3) return NOECHO;
   /* return (float)(sqrt((double)((x-1.0)/253.0))); */
   return (float)(x-1) / 65533.;
 }
@@ -195,9 +192,6 @@ float RH_F(Range x) {
 ******************************/
 float PH_F(Range x) {
   if (x == 0) return BADVAL;
-  if (x == 1) return RFVAL;
-  if (x == 2) return APFLAG;
-  if (x == 3) return NOECHO;
   /*return (float)(180.0*((x-1.0)/254.0));*/ 
   return (360.*(x-1.))/65534.;
  }
@@ -231,9 +225,6 @@ float KD_F(Range x)
 ******/
 
   if (x == 0) return BADVAL;
-  if (x == 1) return RFVAL;
-  if (x == 2) return APFLAG;
-  if (x == 3) return NOECHO;  
   return (x-32768.)/100.;
 }
 
@@ -358,10 +349,6 @@ Range LR_INVF(float x) /* MCTEX */
 /* RH_INVF for 1 or 2 byte data. */
 Range RH_INVF(float x) {
   if (x == BADVAL) return (Range)0;
-  if (x == RFVAL)  return (Range)1;
-  if (x == APFLAG)  return (Range)2;
-  if (x == NOECHO)  return (Range)3;
-
   /* return (Range)(x * x * 253.0 + 1.0 + 0.5); */
   return (Range)(x * 65533. + 1. +.5);
 }
@@ -378,10 +365,6 @@ Range RH_INVF(float x) {
 *******************************/
 Range PH_INVF(float x) {
   if (x == BADVAL) return (Range)0;
-  if (x == RFVAL)  return (Range)1;
-  if (x == APFLAG)  return (Range)2;
-  if (x == NOECHO)  return (Range)3;
-
   /* return (Range)((x / 180.0) * 254.0 + 1.0 + 0.5); */
   return (Range)(x*65534./360. + 1.0 + 0.5);
 }
@@ -390,9 +373,6 @@ Range PH_INVF(float x) {
 /* KD_INVF for 1 or 2 byte data. */
 Range KD_INVF(float x) {
   if (x == BADVAL) return (Range)0;
-  if (x == RFVAL)  return (Range)1;
-  if (x == APFLAG)  return (Range)2;
-  if (x == NOECHO)  return (Range)3;  
   return (Range)(x * 100. + 32768. + 0.5);
 /****** Old code for 1-byte Sigmet native data format commented-out:
   if (x == RFVAL)  return (Range)1;
@@ -699,13 +679,8 @@ Volume *RSL_clear_volume(Volume *v)
 void RSL_free_ray(Ray *r)
 {
   if (r == NULL) return;
-  if (r->range) {
-  free(r->range);
-  r->range = NULL;
-  }
-  
+  if (r->range) free(r->range);
   free(r);
-  r = NULL;
 }
 void RSL_free_sweep(Sweep *s)
 {
@@ -717,7 +692,6 @@ void RSL_free_sweep(Sweep *s)
   if (s->ray) free(s->ray);
   REMOVE_SWEEP(s); /* Remove from internal Sweep list. */
   free(s);
-  s = NULL;
 }
 void RSL_free_volume(Volume *v)
 {
@@ -730,7 +704,6 @@ void RSL_free_volume(Volume *v)
      }
   if (v->sweep) free(v->sweep);
   free(v);
-  v = NULL;
 }
 
 /**********************************************************************/

@@ -135,14 +135,8 @@ void RSL_free_radar(Radar *r)
   if (r) {
 	for (i=0; i<r->h.nvolumes; i++)
 	  RSL_free_volume(r->v[i]);
-	if (r->v)
-           {
-           free(r->v);
-           r->v = NULL;
-           }
-           
+	if (r->v) free(r->v);
 	free(r);
-        r = NULL;
   }
 }
 

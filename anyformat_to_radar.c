@@ -56,7 +56,7 @@ enum File_type RSL_filetype(char *infile)
    * RADTEC - 320      (decimal, in first two bytes)
    * RAINBOW - First two bytes: decimal 1, followed by 'H'
    */
-  FILE *fp = NULL;
+  FILE *fp;
   char magic[11];
 
   if ((fp = fopen(infile, "r")) == NULL) {

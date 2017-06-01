@@ -1214,7 +1214,7 @@ Radar *RSL_hdf5_to_radar(char *infile)
          free(ray_elev0);
          free(ray_elev1);
          free(ray_azim0);
-         free(ray_azim1);         
+         free(ray_azim1);
          free(timestamp);
          H5Dclose(vol);
          H5Dclose(header);
